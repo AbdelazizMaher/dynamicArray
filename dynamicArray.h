@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include <functional>
 #include <iostream>
 #include <mutex>
 
@@ -12,7 +13,7 @@ public:
 	virtual ~lockPolicy() = default;
 };
 
-class mutexLock : lockPolicy {
+class mutexLock : public lockPolicy {
 private:
 	std::mutex m_mtx;
 public:
@@ -28,8 +29,8 @@ template<typename T>
 class dynamicArray {
 private:
 	std::vector<T> m_array{};
-	lockPolicy* m_pLockPolicy{};
-	class nullLock : lockPolicy {
+	std::unique_ptr<lockPolicy> m_pLockPolicy;
+	class nullLock : public lockPolicy {
 	public:
 		void lock() override {
 		}
@@ -41,9 +42,9 @@ private:
 		}
 	};
 public:
-	dynamicArray(lockPolicy* policy = nullptr) : m_pLockPolicy{ policy } {
+	dynamicArray(std::unique_ptr<lockPolicy> policy = nullptr) : m_pLockPolicy{ std::move(policy) } {
 		if (!m_pLockPolicy) {
-			m_pLockPolicy = nullLock::getInstance();
+			m_pLockPolicy.reset(nullLock::getInstance());
 		}
 	}
 	void add(const T& element) {
@@ -116,12 +117,21 @@ public:
 	}
 };
 
+template<typename T>
+using printerFunction = std::function<void (const std::vector<T>&)>;
+
 template<typename T, typename lockPolicy = nullLock>
 class dynamicArray {
 private:
 	std::vector<T> m_array{};
 	lockPolicy m_LockPolicy{};
+	printerFunction<T> m_printer{};
 public:
+	void setPrinter(printerFunction<T> pfunc) {
+		m_LockPolicy.lock();
+		m_printer = pfunc;
+		m_LockPolicy.unlock();
+	}
 	void add(const T& element) {
 		m_LockPolicy.lock();
 		m_array.push_back(element);
@@ -162,10 +172,12 @@ public:
 	}
 	void print() {
 		m_LockPolicy.lock();
-		for (const auto& element : m_array) {
-			std::cout << element << ' ';
-		}
-		std::cout << std::endl;
+		if (m_printer)
+			m_printer(m_array);
+		//for (const auto& element : m_array) {
+		//	std::cout << element << ' ';
+		//}
+		//std::cout << std::endl;
 		m_LockPolicy.unlock();
 	}
 };
